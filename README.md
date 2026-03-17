@@ -685,5 +685,5 @@ pip install WHEEL_FILE
 6. Run experiments sandbox in the environment
 
 ```
-python experiments.py
+python src/experiments.py
 ```
