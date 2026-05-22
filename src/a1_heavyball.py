@@ -1,3 +1,5 @@
+from time import perf_counter
+
 import numpy as np
 
 from model import forward_and_grad, objective_F, soft_threshold
@@ -29,7 +31,10 @@ def heavy_ball_prox_l1_logreg(
         "F": [],
         "g": [],
         "nnz": [],  # Number of non-zero weights.
+        "time": [],
+        "x": [],
     }
+    start_time = perf_counter()
 
     for k in range(max_iter):
         _, grad_w, grad_b, g_value = forward_and_grad(X, y, w, b)
@@ -45,6 +50,8 @@ def heavy_ball_prox_l1_logreg(
         history["F"].append(F_val)
         history["g"].append(g_value)
         history["nnz"].append(np.count_nonzero(w_next))
+        history["time"].append(perf_counter() - start_time)
+        history["x"].append(np.concatenate([w_next.copy(), np.array([b_next])]))
 
         if verbose and (k % 50 == 0 or k == max_iter - 1):
             print(f"k={k:4d}, F={F_val:.6f}, ||dw||={np.linalg.norm(w_next - w):.3e}")

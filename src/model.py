@@ -32,3 +32,20 @@ def objective_F(X, y, w, b, lam):
     """Return F(w, b) = logistic_loss(w, b) + lam * ||w||_1."""
     _, _, _, g_value = forward_and_grad(X, y, w, b)
     return g_value + lam * np.sum(np.abs(w))
+
+
+def stationarity_residual(X, y, w, b, lam, zero_tol=1e-6):
+    """
+    Return the norm of the minimum-norm element of the subdifferential of F.
+
+    For the bias term the objective is smooth, while for the weights the
+    minimum-norm subgradient can be written in closed form.
+    """
+    _, grad_w, grad_b, _ = forward_and_grad(X, y, w, b)
+
+    residual_w = np.empty_like(w)
+    mask_nz = np.abs(w) > zero_tol
+    residual_w[mask_nz] = grad_w[mask_nz] + lam * np.sign(w[mask_nz])
+    residual_w[~mask_nz] = soft_threshold(grad_w[~mask_nz], lam)
+
+    return np.sqrt(np.sum(residual_w ** 2) + grad_b ** 2)
