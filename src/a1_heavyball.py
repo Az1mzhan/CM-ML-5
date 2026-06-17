@@ -28,11 +28,14 @@ def heavy_ball_prox_l1_logreg(
     b_prev = b
 
     history = {
+        "iteration": [],
         "F": [],
         "g": [],
         "nnz": [],  # Number of non-zero weights.
         "time": [],
         "x": [],
+        "step_norm": [],
+        "stop_reason": "max_iter",
     }
     start_time = perf_counter()
 
@@ -47,17 +50,22 @@ def heavy_ball_prox_l1_logreg(
         b_next = y_b
 
         F_val = objective_F(X, y, w_next, b_next, lam)
+        step_norm = np.sqrt(np.linalg.norm(w_next - w) ** 2 + (b_next - b) ** 2)
+
+        history["iteration"].append(k + 1)
         history["F"].append(F_val)
         history["g"].append(g_value)
         history["nnz"].append(np.count_nonzero(w_next))
         history["time"].append(perf_counter() - start_time)
         history["x"].append(np.concatenate([w_next.copy(), np.array([b_next])]))
+        history["step_norm"].append(step_norm)
 
         if verbose and (k % 50 == 0 or k == max_iter - 1):
             print(f"k={k:4d}, F={F_val:.6f}, ||dw||={np.linalg.norm(w_next - w):.3e}")
 
         if np.linalg.norm(w_next - w) <= tol and abs(b_next - b) <= tol:
             w, b = w_next, b_next
+            history["stop_reason"] = "parameter_change"
             break
 
         w_prev, b_prev = w, b
