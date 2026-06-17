@@ -8,6 +8,7 @@ from experiments import (
     save_lambda_plots,
     save_mean_convergence_plots,
     save_problem_size_plots,
+    save_target_vs_stop_plot,
 )
 
 
@@ -51,6 +52,7 @@ def main():
         for method in ("a1", "a2")
     ]
     aggregate_paths = [
+        RESULTS_DIR / "same_start_summary.csv",
         RESULTS_DIR / "scaling_N_mean_std.csv",
         RESULTS_DIR / "lambda_sensitivity_mean_std.csv",
     ]
@@ -64,6 +66,7 @@ def main():
         load_csv_rows(RESULTS_DIR / f"seed_{seed}_best_a2_history.csv")
         for seed in CONVERGENCE_SEEDS
     ]
+    same_start_rows = load_csv_rows(RESULTS_DIR / "same_start_summary.csv")
     scaling_rows = load_csv_rows(RESULTS_DIR / "scaling_N_mean_std.csv")
     lambda_rows = load_csv_rows(RESULTS_DIR / "lambda_sensitivity_mean_std.csv")
 
@@ -75,6 +78,7 @@ def main():
         prefix="seed_0",
     )
     save_mean_convergence_plots(RESULTS_DIR, a1_histories, a2_histories)
+    save_target_vs_stop_plot(RESULTS_DIR, same_start_rows)
     save_problem_size_plots(RESULTS_DIR, scaling_rows)
     save_lambda_plots(RESULTS_DIR, lambda_rows)
 
