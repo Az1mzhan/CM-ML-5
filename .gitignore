@@ -1,0 +1,6 @@
+env
+results
+figures
+.idea
+__pycache__/
+*.pyc
