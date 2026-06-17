@@ -228,19 +228,40 @@ def first_target_hit(history_rows, target_gap):
     return None
 
 
+def numeric_or_blank(value):
+    """Return a float for numeric CSV values, otherwise an empty field."""
+    if value == "":
+        return ""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return ""
+
+
 def add_target_metrics(row, history_rows, target_gap=PRIMARY_GAP_TARGET):
-    """Attach time-to-target information to a final-result row."""
+    """Attach ex-post target-hit and actual stopping information to a row."""
     hit = first_target_hit(history_rows, target_gap)
+    row["gap_at_stop"] = row.get("relative_gap", "")
     row["target_gap"] = target_gap
     row["reached_target"] = hit is not None
     if hit is None:
         row["iterations_to_target"] = ""
         row["time_to_target"] = ""
         row["gap_at_target"] = ""
+        row["extra_iterations_after_target"] = ""
+        row["extra_time_after_target"] = ""
     else:
         row["iterations_to_target"] = hit["iteration"]
         row["time_to_target"] = hit["time_seconds"]
         row["gap_at_target"] = hit["relative_gap"]
+        final_iterations = numeric_or_blank(row.get("iterations", ""))
+        final_time = numeric_or_blank(row.get("time_seconds", ""))
+        row["extra_iterations_after_target"] = (
+            final_iterations - hit["iteration"] if final_iterations != "" else ""
+        )
+        row["extra_time_after_target"] = (
+            max(final_time - hit["time_seconds"], 0.0) if final_time != "" else ""
+        )
     return row
 
 
@@ -351,12 +372,26 @@ def save_history_csv(path, rows):
 
 
 def choose_best_configuration(rows, target_gap=PRIMARY_GAP_TARGET):
-    """Choose the fastest configuration that reaches the shared target gap."""
+    """Choose the fastest configuration that reaches the target and stops cleanly."""
     admissible = [row for row in rows if row["reached_target"]]
     if admissible:
+        clean_stop_rows = [
+            row for row in admissible
+            if row.get("stop_reason") not in {
+                "solver_accuracy_limit",
+                "master_solver_failure",
+                "master_certificate_failure",
+                "max_iter",
+            }
+        ]
+        candidates = clean_stop_rows or admissible
         return min(
-            admissible,
-            key=lambda row: (float(row["time_to_target"]), row["iterations_to_target"]),
+            candidates,
+            key=lambda row: (
+                float(row["time_seconds"]),
+                float(row["time_to_target"]),
+                row["iterations"],
+            ),
         )
     return min(rows, key=lambda row: (row["relative_gap"], row["time_seconds"]))
 
@@ -376,8 +411,12 @@ def aggregate_rows(rows, group_keys):
         "iterations",
         "time_seconds",
         "nnz",
+        "gap_at_stop",
+        "gap_at_target",
         "time_to_target",
         "iterations_to_target",
+        "extra_time_after_target",
+        "extra_iterations_after_target",
     ]
 
     aggregated = []
@@ -417,6 +456,7 @@ def print_parameter_table(title, rows, config_headers):
         "time_seconds",
         "reached_target",
         "time_to_target",
+        "extra_time_after_target",
     ]
     headers = config_headers + metric_headers
 
@@ -454,6 +494,8 @@ def print_summary_table(rows, ref):
         "time_seconds",
         "reached_target",
         "time_to_target",
+        "extra_time_after_target",
+        "stop_reason",
     ]
 
     print("\n=== Same-start summary ===")
@@ -687,6 +729,38 @@ def save_mean_std_plot(
     plt.close()
 
 
+def save_target_vs_stop_plot(results_dir, summary_rows):
+    """Show ex-post target-hit time beside actual stopping time."""
+    figures_dir = results_dir / "figures"
+    figures_dir.mkdir(parents=True, exist_ok=True)
+
+    rows = [
+        row for row in summary_rows
+        if row.get("method") in {"A1", "A2"} and row.get("time_to_target", "") != ""
+    ]
+    if not rows:
+        return
+
+    labels = [row["method"] for row in rows]
+    target_times = [float(row["time_to_target"]) for row in rows]
+    stop_times = [float(row["time_seconds"]) for row in rows]
+    x = np.arange(len(labels))
+    width = 0.36
+
+    plt.figure(figsize=(7, 5))
+    plt.bar(x - width / 2, target_times, width, label="First target hit")
+    plt.bar(x + width / 2, stop_times, width, label="Actual stopping")
+    plt.yscale("log")
+    plt.xticks(x, labels)
+    plt.ylabel("Wall-clock time (s)")
+    plt.title("Target-Hit Time vs Actual Stopping Time")
+    plt.grid(True, axis="y", which="both", linestyle="--", alpha=0.4)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(figures_dir / "target_vs_stop_time_same_start.png", dpi=300)
+    plt.close()
+
+
 def save_problem_size_plots(results_dir, scaling_agg_rows):
     """Generate scaling plots for comparable target accuracy."""
     figures_dir = results_dir / "figures"
@@ -701,6 +775,17 @@ def save_problem_size_plots(results_dir, scaling_agg_rows):
         ylabel=f"Time to relative gap <= {PRIMARY_GAP_TARGET:g} (s)",
         title="Time to Target Gap vs N",
         path=figures_dir / "time_to_target_vs_N.png",
+        yscale_log=True,
+    )
+    save_mean_std_plot(
+        rows=scaling_agg_rows,
+        x_key="N",
+        y_mean_key="time_seconds_mean",
+        y_std_key="time_seconds_std",
+        xlabel="Number of samples N",
+        ylabel="Actual stopping time (s)",
+        title="Actual Stopping Time vs N",
+        path=figures_dir / "stop_time_vs_N.png",
         yscale_log=True,
     )
 
@@ -730,6 +815,18 @@ def save_lambda_plots(results_dir, lambda_agg_rows):
         ylabel=f"Time to relative gap <= {PRIMARY_GAP_TARGET:g} (s)",
         title="Time to Target Gap vs Lambda",
         path=figures_dir / "time_to_target_vs_lambda.png",
+        xscale_log=True,
+        yscale_log=True,
+    )
+    save_mean_std_plot(
+        rows=lambda_agg_rows,
+        x_key="lambda",
+        y_mean_key="time_seconds_mean",
+        y_std_key="time_seconds_std",
+        xlabel="Regularization parameter lambda",
+        ylabel="Actual stopping time (s)",
+        title="Actual Stopping Time vs Lambda",
+        path=figures_dir / "stop_time_vs_lambda.png",
         xscale_log=True,
         yscale_log=True,
     )
@@ -838,6 +935,9 @@ def run_original_parameter_study():
             "iterations_to_target": 1,
             "time_to_target": ref["time_seconds"],
             "gap_at_target": 0.0,
+            "gap_at_stop": 0.0,
+            "extra_iterations_after_target": 0,
+            "extra_time_after_target": 0.0,
             "stop_reason": ref["status"],
             "notes": "reference objective value",
         },
@@ -847,6 +947,7 @@ def run_original_parameter_study():
         "alpha", "beta", "objective", "relative_gap", "prox_gradient_residual",
         "stationarity_residual", "iterations", "time_seconds", "target_gap",
         "reached_target", "iterations_to_target", "time_to_target", "gap_at_target",
+        "gap_at_stop", "extra_iterations_after_target", "extra_time_after_target",
         "nnz", "stop_reason",
     ]
     a2_headers = [
@@ -854,6 +955,7 @@ def run_original_parameter_study():
         "prox_gradient_residual", "stationarity_residual", "iterations",
         "serious_steps", "null_steps", "time_seconds", "target_gap",
         "reached_target", "iterations_to_target", "time_to_target", "gap_at_target",
+        "gap_at_stop", "extra_iterations_after_target", "extra_time_after_target",
         "nnz", "stop_reason", "last_delta_pred", "last_delta_act",
         "last_solver", "last_solver_status",
     ]
@@ -861,12 +963,21 @@ def run_original_parameter_study():
         "method", "configuration", "objective", "relative_gap",
         "prox_gradient_residual", "stationarity_residual", "iterations",
         "time_seconds", "target_gap", "reached_target", "iterations_to_target",
-        "time_to_target", "gap_at_target", "nnz", "stop_reason", "notes",
+        "time_to_target", "gap_at_target", "gap_at_stop",
+        "extra_iterations_after_target", "extra_time_after_target",
+        "nnz", "stop_reason", "notes",
+    ]
+    stopping_headers = [
+        "method", "configuration", "target_gap", "reached_target",
+        "iterations_to_target", "time_to_target", "iterations", "time_seconds",
+        "extra_iterations_after_target", "extra_time_after_target",
+        "gap_at_target", "gap_at_stop", "stop_reason", "notes",
     ]
 
     save_csv(RESULTS_DIR / "a1_parameter_sweep.csv", a1_headers, a1_rows)
     save_csv(RESULTS_DIR / "a2_parameter_sweep.csv", a2_headers, a2_rows)
     save_csv(RESULTS_DIR / "same_start_summary.csv", summary_headers, summary_rows)
+    save_csv(RESULTS_DIR / "stopping_vs_target_summary.csv", stopping_headers, summary_rows)
     save_history_csv(RESULTS_DIR / "best_a1_history.csv", best_a1_artifact["history_rows"])
     save_history_csv(RESULTS_DIR / "best_a2_history.csv", best_a2_artifact["history_rows"])
     save_history_csv(RESULTS_DIR / "best_a2_warm_start_history.csv", warm_history_rows)
@@ -876,6 +987,7 @@ def run_original_parameter_study():
         best_a1_artifact["history_rows"],
         best_a2_artifact["history_rows"],
     )
+    save_target_vs_stop_plot(RESULTS_DIR, summary_rows)
 
     a1_mean_histories = []
     a2_mean_histories = []
@@ -911,12 +1023,12 @@ def run_original_parameter_study():
 
     print_parameter_table(
         "A1 parameter sweep",
-        sorted(a1_rows, key=lambda row: (not row["reached_target"], row.get("time_to_target") or 1e99)),
+        sorted(a1_rows, key=lambda row: (not row["reached_target"], row.get("time_seconds") or 1e99)),
         ["alpha", "beta"],
     )
     print_parameter_table(
         "A2 parameter sweep",
-        sorted(a2_rows, key=lambda row: (not row["reached_target"], row.get("time_to_target") or 1e99)),
+        sorted(a2_rows, key=lambda row: (not row["reached_target"], row.get("time_seconds") or 1e99)),
         ["rho", "gamma", "bundle_max"],
     )
     print_summary_table(summary_rows, ref)
@@ -984,6 +1096,7 @@ def run_problem_size_scaling(best_a1, best_a2):
         "relative_gap", "prox_gradient_residual", "stationarity_residual",
         "iterations", "time_seconds", "target_gap", "reached_target",
         "iterations_to_target", "time_to_target", "gap_at_target", "nnz",
+        "gap_at_stop", "extra_iterations_after_target", "extra_time_after_target",
         "stop_reason", "reference_time_seconds",
     ]
     save_csv(RESULTS_DIR / "scaling_N_all_seeds.csv", headers, rows)
@@ -995,8 +1108,11 @@ def run_problem_size_scaling(best_a1, best_a2):
         "prox_gradient_residual_mean", "prox_gradient_residual_std",
         "stationarity_residual_mean", "stationarity_residual_std",
         "iterations_mean", "iterations_std", "time_seconds_mean", "time_seconds_std",
+        "gap_at_stop_mean", "gap_at_stop_std", "gap_at_target_mean", "gap_at_target_std",
         "time_to_target_mean", "time_to_target_std",
         "iterations_to_target_mean", "iterations_to_target_std",
+        "extra_time_after_target_mean", "extra_time_after_target_std",
+        "extra_iterations_after_target_mean", "extra_iterations_after_target_std",
         "nnz_mean", "nnz_std",
     ]
     save_csv(RESULTS_DIR / "scaling_N_mean_std.csv", agg_headers, agg)
@@ -1062,7 +1178,8 @@ def run_lambda_sensitivity(best_a1, best_a2):
         "objective", "relative_gap", "prox_gradient_residual",
         "stationarity_residual", "iterations", "time_seconds", "target_gap",
         "reached_target", "iterations_to_target", "time_to_target",
-        "gap_at_target", "nnz", "stop_reason", "reference_time_seconds",
+        "gap_at_target", "gap_at_stop", "extra_iterations_after_target",
+        "extra_time_after_target", "nnz", "stop_reason", "reference_time_seconds",
     ]
     save_csv(RESULTS_DIR / "lambda_sensitivity_all_seeds.csv", headers, rows)
 
@@ -1073,8 +1190,11 @@ def run_lambda_sensitivity(best_a1, best_a2):
         "prox_gradient_residual_mean", "prox_gradient_residual_std",
         "stationarity_residual_mean", "stationarity_residual_std",
         "iterations_mean", "iterations_std", "time_seconds_mean", "time_seconds_std",
+        "gap_at_stop_mean", "gap_at_stop_std", "gap_at_target_mean", "gap_at_target_std",
         "time_to_target_mean", "time_to_target_std",
         "iterations_to_target_mean", "iterations_to_target_std",
+        "extra_time_after_target_mean", "extra_time_after_target_std",
+        "extra_iterations_after_target_mean", "extra_iterations_after_target_std",
         "nnz_mean", "nnz_std",
     ]
     save_csv(RESULTS_DIR / "lambda_sensitivity_mean_std.csv", agg_headers, agg)

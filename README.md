@@ -7,8 +7,10 @@ logistic regression:
 - **A2:** proximal bundle method
 
 The project compares optimization performance, not classification accuracy.
-The main comparison uses the time and iteration count needed to reach the same
-relative objective gap target, \(10^{-8}\).
+The main accuracy audit uses the first time and iteration count at which each
+method reaches the same relative objective gap target, \(10^{-8}\). The reports
+also keep the actual stopping time, stopping iteration, and stopping reason, so
+target-hit time is not confused with certified algorithm termination.
 
 ## File Structure
 
@@ -80,6 +82,7 @@ Important CSV files:
 results/a1_parameter_sweep.csv
 results/a2_parameter_sweep.csv
 results/same_start_summary.csv
+results/stopping_vs_target_summary.csv
 results/scaling_N_mean_std.csv
 results/lambda_sensitivity_mean_std.csv
 ```
@@ -91,9 +94,12 @@ results/figures/mean_relative_gap_vs_iteration.png
 results/figures/mean_relative_gap_vs_time.png
 results/figures/mean_pg_residual_vs_iteration.png
 results/figures/mean_pg_residual_vs_time.png
+results/figures/target_vs_stop_time_same_start.png
 results/figures/time_to_target_vs_N.png
+results/figures/stop_time_vs_N.png
 results/figures/nnz_vs_lambda.png
 results/figures/time_to_target_vs_lambda.png
+results/figures/stop_time_vs_lambda.png
 ```
 
 Representative seed figures:
